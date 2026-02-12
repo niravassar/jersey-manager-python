@@ -3,6 +3,7 @@ from tkinter import filedialog, messagebox
 import pandas as pd
 import re
 import os
+import random  # <--- Added Import
 
 class JerseyManagerApp:
     def __init__(self, root):
@@ -68,9 +69,7 @@ class JerseyManagerApp:
     def clean_name(self, val):
         """Parses 'Player First Name : John' to 'John'"""
         if pd.isna(val): return ""
-        # Remove prefix "Player First Name :" or "Player Last Name :" ignoring case and spaces/newlines
         val = re.sub(r'Player\s*(First|Last)\s*Name\s*[:]\s*', '', str(val), flags=re.IGNORECASE)
-        # Remove any stray newlines or weird whitespace inside
         return val.strip()
 
     def extract_jersey_number(self, val):
@@ -96,29 +95,21 @@ class JerseyManagerApp:
             df_vendor = self.load_file(vendor_path)
             df_team = self.load_file(team_path)
 
-            # ADD THESE TWO LINES HERE:
             df_vendor['Options Detail'] = df_vendor['Options Detail'].astype(str)
             df_team['Jersey'] = df_team['Jersey'].astype(str)
 
-            # --- PROCESSING LOGIC START ---
-
-            # Filter Vendor Sheet: Only "GSSA Purple Game Jersey"
-            # We work on a copy for processing, but update the original df_vendor later
             df_orders = df_vendor[df_vendor['Product Name'] == 'GSSA Purple Game Jersey'].copy()
 
-            # Clean Vendor Columns for matching
             df_orders['Clean_First'] = df_orders['Additional Info Question 1'].apply(self.clean_name)
             df_orders['Clean_Last'] = df_orders['Additional Info Question 2'].apply(self.clean_name)
             df_orders['Ordered_Jersey'] = df_orders['Options Detail'].apply(self.extract_jersey_number)
 
-            # Clean Team Sheet for matching
             df_team['Match_First'] = df_team['First Name'].astype(str).str.strip().str.lower()
             df_team['Match_Last'] = df_team['Last Name'].astype(str).str.strip().str.lower()
             df_team['Jersey_Clean'] = pd.to_numeric(df_team['Jersey'], errors='coerce')
 
             report_log = []
 
-            # Iterate through orders
             for index, row in df_orders.iterrows():
                 p_first = row['Clean_First']
                 p_last = row['Clean_Last']
@@ -127,7 +118,6 @@ class JerseyManagerApp:
                 match_first = p_first.lower()
                 match_last = p_last.lower()
 
-                # Find player in Team Sheet
                 player_record = df_team[
                     (df_team['Match_First'] == match_first) &
                     (df_team['Match_Last'] == match_last)
@@ -141,11 +131,9 @@ class JerseyManagerApp:
                     })
                     continue
 
-                # Get Team Info
                 team_name = player_record.iloc[0]['Team Name']
                 team_idx = player_record.index[0]
 
-                # Check conflicts on the team
                 team_roster = df_team[df_team['Team Name'] == team_name]
                 taken_numbers = team_roster[team_roster.index != team_idx]['Jersey_Clean'].dropna().astype(int).tolist()
 
@@ -164,51 +152,40 @@ class JerseyManagerApp:
                 else:
                     status = "CHANGED"
                     reason = f"Conflict: #{ordered_num} taken on {team_name}"
-                    # Find first available number
-                    for i in range(1, 100):
-                        if i not in taken_numbers and i != ordered_num:
-                            final_number = i
-                            break
 
-                # Update Log
+                    # --- UPDATED RANDOM LOGIC ---
+                    all_possible = list(range(1, 101))
+                    available_choices = [n for n in all_possible if n not in taken_numbers]
+
+                    if available_choices:
+                        final_number = random.choice(available_choices)
+                    else:
+                        final_number = "N/A"
+                    # -----------------------------
+
                 report_log.append({
                     'First Name': p_first, 'Last Name': p_last, 'Team': team_name,
                     'Ordered': ordered_num, 'Final': final_number, 'Status': status,
                     'Reason': reason
                 })
 
-                # Format Result String
                 if status == 'CHANGED':
                     val_str = f"CHANGED: {final_number}"
                 else:
                     val_str = str(final_number)
 
-                # UPDATE VENDOR SHEET (Original DF)
-                # Overwrite 'Options Detail'
                 df_vendor.at[index, 'Options Detail'] = val_str
-
-                # UPDATE TEAM SHEET (Original DF)
-                # Overwrite 'Jersey'
                 df_team.at[team_idx, 'Jersey'] = val_str
 
-            # --- EXPORTING ---
-
-            # Prepare Report
             df_report = pd.DataFrame(report_log)
-
-            # Determine Output Paths (Same folder as vendor file)
             base_dir = os.path.dirname(vendor_path)
             out_vendor = os.path.join(base_dir, "UPDATED_Vendor_Orders.csv")
             out_team = os.path.join(base_dir, "UPDATED_Team_Assignments.csv")
             out_report = os.path.join(base_dir, "Process_Report.csv")
 
-            # Save Files (Using CSV to ensure compatibility)
             df_vendor.to_csv(out_vendor, index=False)
-
-            # Cleanup Team DF before saving (remove helper cols)
             df_team.drop(columns=['Match_First', 'Match_Last', 'Jersey_Clean'], inplace=True, errors='ignore')
             df_team.to_csv(out_team, index=False)
-
             df_report.to_csv(out_report, index=False)
 
             self.status_var.set("Processing Complete!")
