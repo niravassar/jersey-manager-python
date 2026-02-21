@@ -177,6 +177,25 @@ class JerseyManagerApp:
                 df_vendor.at[index, 'Options Detail'] = val_str
                 df_team.at[team_idx, 'Jersey'] = val_str
 
+            # --- FINAL UNIQUENESS CHECK ---
+            # Group by Team and Jersey to find any duplicates
+            # We only check players who actually have a jersey assigned
+            mask = (df_team['Jersey'].notna()) & (df_team['Jersey'].astype(str).str.strip() != "")
+            conflicts = df_team[mask].groupby(['Team Name', 'Jersey'])
+
+            for (team_name, jersey_num), group in conflicts:
+                if len(group) > 1:
+                    # Duplicate found! Log every player involved in the conflict
+                    for _, dup_row in group.iterrows():
+                        report_log.append({
+                            'Player': f"{dup_row['First Name']} {dup_row['Last Name']}",
+                            'Team': team_name,
+                            'Ordered': 'N/A',
+                            'Final': jersey_num,
+                            'Status': 'CONFLICT',
+                            'Reason': f"DUPLICATE FOUND: Number {jersey_num} is assigned to multiple players on team {team_name}."
+                        })
+
             df_report = pd.DataFrame(report_log)
             base_dir = os.path.dirname(vendor_path)
             out_vendor = os.path.join(base_dir, "UPDATED_Vendor_Orders.csv")
